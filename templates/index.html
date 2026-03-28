@@ -1,1 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Patient Zero</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <div class="header-left">
+      <span class="logo">Patient Zero</span>
+      <span class="badge">Markov Chain + Monte Carlo AI</span>
+    </div>
+    <div class="header-right">
+      Step: <strong id="stepc">0</strong>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <button class="btn primary" id="startBtn" onclick="toggleSim()">&#9654; Start</button>
+      <button class="btn" onclick="resetAll()">&#8635; Reset</button>
+      <div class="sep"></div>
+      <span class="label">Mode:</span>
+      <button class="pill active" onclick="setMode('vaccinate',this)">Vaccinate</button>
+      <button class="pill" onclick="setMode('isolate',this)">Isolate</button>
+      <button class="pill" onclick="setMode('infect',this)">Infect</button>
+    </div>
+    <div class="toolbar-right">
+      <span class="label">Network:</span>
+      <select id="netType" onchange="changeNet(this.value)">
+        <option value="random">Random</option>
+        <option value="cluster">Cluster</option>
+        <option value="ring">Ring</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Params -->
+  <div class="params-bar">
+    <div class="param-card">
+      <div class="param-label">Transmission (β)</div>
+      <div class="param-row">
+        <input type="range" min="1" max="9" value="3" step="1"
+               oninput="beta=+this.value/10;id('bv').textContent=beta.toFixed(1);fetchMarkov()">
+        <span id="bv">0.3</span>
+      </div>
+    </div>
+    <div class="param-card">
+      <div class="param-label">Recovery (γ)</div>
+      <div class="param-row">
+        <input type="range" min="1" max="9" value="1" step="1"
+               oninput="gamma=+this.value/10;id('gv').textContent=gamma.toFixed(1);fetchMarkov()">
+        <span id="gv">0.1</span>
+      </div>
+    </div>
+    <div class="param-card">
+      <div class="param-label">Speed</div>
+      <div class="param-row">
+        <input type="range" min="1" max="10" value="5" step="1"
+               oninput="spd=+this.value;id('spv').textContent=this.value;restartTimer()">
+        <span id="spv">5</span>
+      </div>
+    </div>
+    <div class="param-card">
+      <div class="param-label">Node count <button class="btn small" onclick="resetAll()" style="margin-left:6px">Apply</button></div>
+      <div class="param-row">
+        <input type="range" min="15" max="60" value="35" step="1"
+               oninput="nodeCount=+this.value;id('nv').textContent=this.value">
+        <span id="nv">35</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content-grid">
+
+    <!-- Graph -->
+    <div class="graph-wrap">
+      <canvas id="nc"></canvas>
+      <p class="hint">Click a node to apply the selected mode &nbsp;|&nbsp; Yellow ring = AI suggestion</p>
+      <div class="legend">
+        <span class="leg"><span class="dot" style="background:#4CAF50"></span>Susceptible (S)</span>
+        <span class="leg"><span class="dot" style="background:#F44336"></span>Infected (I)</span>
+        <span class="leg"><span class="dot" style="background:#2196F3"></span>Recovered (R)</span>
+        <span class="leg"><span class="dot" style="background:#FF9800"></span>Vaccinated (V)</span>
+        <span class="leg"><span class="dot" style="background:#9E9E9E;outline:2px dashed #555;outline-offset:1px"></span>Isolated</span>
+        <span class="leg"><span class="dot" style="background:#4CAF50;outline:2.5px solid #FF9800;outline-offset:2px"></span>AI suggestion</span>
+      </div>
+    </div>
+
+    <!-- Side panel -->
+    <aside class="panel">
+
+      <!-- Stats -->
+      <div class="card">
+        <div class="card-title">Statistics</div>
+        <div class="stat-grid">
+          <div class="stat"><div class="stat-lbl">Susceptible</div><div class="stat-val" id="ss" style="color:#2E7D32">0</div></div>
+          <div class="stat"><div class="stat-lbl">Infected</div><div class="stat-val"    id="si" style="color:#C62828">0</div></div>
+          <div class="stat"><div class="stat-lbl">Recovered</div><div class="stat-val"   id="sr" style="color:#1565C0">0</div></div>
+          <div class="stat"><div class="stat-lbl">Vaccinated</div><div class="stat-val"  id="sv" style="color:#E65100">0</div></div>
+        </div>
+      </div>
+
+      <!-- R0 -->
+      <div class="card">
+        <div class="card-title">R₀ &amp; Herd Immunity</div>
+        <div class="r0-row">
+          <span class="r0-num" id="r0val">3.00</span>
+          <span class="r0-lbl" id="r0lbl">Epidemic spreads — R₀ &gt; 1</span>
+        </div>
+        <div class="herd-meta">Threshold: <strong id="herdpct">67%</strong> &nbsp;|&nbsp; Current: <strong id="curpct">0%</strong></div>
+        <div class="prog-bar"><div class="prog-fill" id="herdfill"></div></div>
+      </div>
+
+      <!-- Markov -->
+      <div class="card">
+        <div class="card-title">Markov Transition Matrix</div>
+        <table class="mtable">
+          <tr><th></th><th>→S</th><th>→I</th><th>→R</th></tr>
+          <tr><th>S</th><td class="mg" id="mss">—</td><td class="mr" id="msi">—</td><td class="md">0</td></tr>
+          <tr><th>I</th><td class="md">0</td><td class="mr" id="mii">—</td><td class="mb" id="mir">—</td></tr>
+          <tr><th>R</th><td class="md">0</td><td class="md">0</td><td class="mb">1.0</td></tr>
+        </table>
+        <div class="card-title" style="margin-top:10px">Steady-state &nbsp;<span style="font-weight:400;font-size:10px">(π = πP)</span></div>
+        <div class="steady-row">
+          <div class="sp green">S: <span id="pis">—</span></div>
+          <div class="sp red">I: <span id="pii">—</span></div>
+          <div class="sp blue">R: <span id="pir">—</span></div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="card">
+        <div class="card-title">SIR Chart</div>
+        <div style="height:96px;position:relative"><canvas id="cc"></canvas></div>
+      </div>
+
+      <!-- AI -->
+      <div class="card ai-card">
+        <div class="card-title ai-title"><span class="ai-dot"></span>AI Vaccination Advisor</div>
+        <p class="ai-msg" id="aimsg">Run Monte Carlo analysis to get suggestions.</p>
+        <div class="ai-tags" id="aitags"></div>
+        <button class="btn amber full" id="aiRunBtn" onclick="runAI()">&#9881; Run Monte Carlo Analysis</button>
+        <button class="btn green full" id="applyBtn" onclick="applyAI()" style="display:none">&#10003; Apply AI Suggestions</button>
+        <p class="ai-sub" id="aisub"></p>
+      </div>
+
+    </aside>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
 
